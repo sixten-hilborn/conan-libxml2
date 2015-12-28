@@ -1,7 +1,7 @@
 from conans import ConanFile
 import os, shutil
 from conans.tools import download, unzip, replace_in_file, check_md5
-from conans import CMake
+from conans import CMake, ConfigureEnvironment
 
 
 class LibxmlConan(ConanFile):
@@ -30,42 +30,26 @@ class LibxmlConan(ConanFile):
         self.options.shared = True # Static in win doesn't work, runtime errors
         self.options["zlib"].shared = True
         
-    def generic_env_configure_vars(self, verbose=False):
-        """Reusable in any lib with configure!!"""
-        if self.settings.os == "Linux" or self.settings.os == "Macos":
-            libs = 'LIBS="%s"' % " ".join(["-l%s" % lib for lib in self.deps_cpp_info.libs])
-            ldflags = 'LDFLAGS="%s"' % " ".join(["-L%s" % lib for lib in self.deps_cpp_info.lib_paths]) 
-            archflag = "-m32" if self.settings.arch == "x86" else ""
-            cflags = 'CFLAGS="%s %s"' % (archflag, " ".join(self.deps_cpp_info.cflags))
-            cpp_flags = 'CPPFLAGS="%s %s"' % (archflag, " ".join(self.deps_cpp_info.cppflags))
-            command = "env %s %s %s %s" % (libs, ldflags, cflags, cpp_flags)
-        elif self.settings.os == "Windows" and self.settings.compiler == "Visual Studio":
-            cl_args = " ".join(['/I"%s"' % lib for lib in self.deps_cpp_info.include_paths])
-            lib_paths= ";".join(['"%s"' % lib for lib in self.deps_cpp_info.lib_paths])
-            command = "SET LIB=%s;%%LIB%% && SET CL=%s" % (lib_paths, cl_args)
-            if verbose:
-                command += " && SET LINK=/VERBOSE"
-        
-        return command
-       
     def build(self):
+        env_config = ConfigureEnvironment(self.deps_cpp_info, self.settings)
+        
         if self.settings.os == "Windows":
-            self.build_windows()
+            self.build_windows(env_config)
         else:
-            self.build_with_configure()
+            self.build_with_configure(env_config)
             
         
-    def build_windows(self):
+    def build_windows(self, env_config):
+        
         iconv_headers_paths = self.deps_cpp_info["winiconv"].include_paths[0]
         iconv_lib_paths= " ".join(['lib="%s"' % lib for lib in self.deps_cpp_info["winiconv"].lib_paths])
-        
-        env_variables = self.generic_env_configure_vars()
+    
         compiler = "msvc" if self.settings.compiler == "Visual Studio" else self.settings.compiler == "gcc"
         debug = "yes" if self.settings.build_type == "Debug" else "no"
         
         configure_command = "cd %s/win32 && %s && cscript configure.js " \
                             "zlib=1 compiler=%s cruntime=/%s debug=%s include=\"%s\" %s" % (self.ZIP_FOLDER_NAME, 
-                                                                               env_variables,
+                                                                               env_config.command_line,
                                                                                compiler, 
                                                                                self.settings.compiler.runtime,
                                                                                debug, 
@@ -83,11 +67,11 @@ class LibxmlConan(ConanFile):
         self.output.warn(make_command)
         self.run(make_command)
         
-    def build_with_configure(self): 
+    def build_with_configure(self, env_config): 
         zlib = "--with-zlib=%s" % self.deps_cpp_info["zlib"].lib_paths[0]
         configure_command = "cd %s && %s ./configure %s --with-python=no" % (self.ZIP_FOLDER_NAME, 
-                                                                                 self.generic_env_configure_vars(), 
-                                                                                 zlib)
+                                                                             env_config.command_line, 
+                                                                             zlib)
         self.output.warn(configure_command)
         self.run(configure_command)
         self.run("cd %s && make" % self.ZIP_FOLDER_NAME)
