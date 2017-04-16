@@ -38,14 +38,17 @@ class LibxmlConan(ConanFile):
     def build_windows(self):
         iconv_headers_paths = self.deps_cpp_info["winiconv"].include_paths[0]
         iconv_lib_paths= " ".join(['lib="%s"' % lib for lib in self.deps_cpp_info["winiconv"].lib_paths])
-        
-        env = VisualStudioBuildEnvironment(self)
+        is_vs = self.settings.compiler == "Visual Studio"
+
+        env = VisualStudioBuildEnvironment(self) if is_vs else AutoToolsBuildEnvironment(self)
         with environment_append(env.vars):
-            vc_command = vcvars_command(self.settings)
-            compiler = "msvc" if self.settings.compiler == "Visual Studio" else self.settings.compiler == "gcc"
+            vc_command = vcvars_command(self.settings) if is_vs else ''
+            if vc_command:
+                vc_command += ' &&'
+            compiler = "msvc" if is_vs else self.settings.compiler == "gcc"
             debug = "yes" if self.settings.build_type == "Debug" else "no"
 
-            configure_command = "%s && cd %s/win32 && cscript configure.js " \
+            configure_command = "%s cd %s/win32 && cscript configure.js " \
                                 "zlib=1 compiler=%s cruntime=/%s debug=%s include=\"%s\" %s" % (vc_command,
                                                                                 self.ZIP_FOLDER_NAME,
                                                                                 compiler, 
@@ -60,8 +63,8 @@ class LibxmlConan(ConanFile):
             # Zlib library name is not zlib.lib always, it depends on configuration
             replace_in_file(makefile_path, "LIBS = $(LIBS) zlib.lib", "LIBS = $(LIBS) %s.lib" % self.deps_cpp_info["zlib"].libs[0])
 
-            make_command = "nmake /f Makefile.msvc" if self.settings.compiler == "Visual Studio" else "make -f Makefile.mingw"
-            make_command = "%s && cd %s/win32 && %s" % (vc_command, self.ZIP_FOLDER_NAME, make_command)
+            make_command = "nmake /f Makefile.msvc" if is_vs else "make -f Makefile.mingw"
+            make_command = "%s cd %s/win32 && %s" % (vc_command, self.ZIP_FOLDER_NAME, make_command)
             self.output.warn(make_command)
             self.run(make_command)
         
