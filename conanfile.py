@@ -1,7 +1,7 @@
 from conans import ConanFile
 import os, shutil
-from conans.tools import download, unzip, replace_in_file, check_md5
-from conans import CMake, ConfigureEnvironment
+from conans.tools import download, unzip, replace_in_file, check_md5, environment_append, vcvars_command
+from conans import CMake, AutoToolsBuildEnvironment, VisualStudioBuildEnvironment
 
 
 class LibxmlConan(ConanFile):
@@ -14,7 +14,7 @@ class LibxmlConan(ConanFile):
     options = {"shared": [True, False]}
     default_options = "shared=False"
     exports = ["CMakeLists.txt", "FindLibXml2.cmake"]
-    url = "http://github.com/lasote/conan-libxml2"
+    url = "http://github.com/sixten-hilborn/conan-libxml2"
     requires = "zlib/1.2.8@lasote/stable", "libiconv/1.14@lasote/stable"
 
     def source(self):
@@ -39,45 +39,46 @@ class LibxmlConan(ConanFile):
         iconv_headers_paths = self.deps_cpp_info["winiconv"].include_paths[0]
         iconv_lib_paths= " ".join(['lib="%s"' % lib for lib in self.deps_cpp_info["winiconv"].lib_paths])
         
-        env = ConfigureEnvironment(self.deps_cpp_info, self.settings)
-        vc_command = env.command_line_env
-        compiler = "msvc" if self.settings.compiler == "Visual Studio" else self.settings.compiler == "gcc"
-        debug = "yes" if self.settings.build_type == "Debug" else "no"
+        env = VisualStudioBuildEnvironment(self)
+        with environment_append(env.vars):
+            vc_command = vcvars_command(self.settings)
+            compiler = "msvc" if self.settings.compiler == "Visual Studio" else self.settings.compiler == "gcc"
+            debug = "yes" if self.settings.build_type == "Debug" else "no"
 
-        configure_command = "%s && cd %s/win32 && cscript configure.js " \
-                            "zlib=1 compiler=%s cruntime=/%s debug=%s include=\"%s\" %s" % (vc_command,
-                                                                               self.ZIP_FOLDER_NAME,
-                                                                               compiler, 
-                                                                               self.settings.compiler.runtime,
-                                                                               debug, 
-                                                                               iconv_headers_paths, 
-                                                                               iconv_lib_paths) 
-        self.output.warn(configure_command)
-        self.run(configure_command)
-        
-        makefile_path = os.path.join(self.ZIP_FOLDER_NAME, "win32", "Makefile.msvc")
-        # Zlib library name is not zlib.lib always, it depends on configuration
-        replace_in_file(makefile_path, "LIBS = $(LIBS) zlib.lib", "LIBS = $(LIBS) %s.lib" % self.deps_cpp_info["zlib"].libs[0])
-        
-        make_command = "nmake /f Makefile.msvc" if self.settings.compiler == "Visual Studio" else "make -f Makefile.mingw"
-        make_command = "%s && cd %s/win32 && %s" % (vc_command, self.ZIP_FOLDER_NAME, make_command)
-        self.output.warn(make_command)
-        self.run(make_command)
+            configure_command = "%s && cd %s/win32 && cscript configure.js " \
+                                "zlib=1 compiler=%s cruntime=/%s debug=%s include=\"%s\" %s" % (vc_command,
+                                                                                self.ZIP_FOLDER_NAME,
+                                                                                compiler, 
+                                                                                self.settings.compiler.runtime,
+                                                                                debug, 
+                                                                                iconv_headers_paths, 
+                                                                                iconv_lib_paths) 
+            self.output.warn(configure_command)
+            self.run(configure_command)
+
+            makefile_path = os.path.join(self.ZIP_FOLDER_NAME, "win32", "Makefile.msvc")
+            # Zlib library name is not zlib.lib always, it depends on configuration
+            replace_in_file(makefile_path, "LIBS = $(LIBS) zlib.lib", "LIBS = $(LIBS) %s.lib" % self.deps_cpp_info["zlib"].libs[0])
+
+            make_command = "nmake /f Makefile.msvc" if self.settings.compiler == "Visual Studio" else "make -f Makefile.mingw"
+            make_command = "%s && cd %s/win32 && %s" % (vc_command, self.ZIP_FOLDER_NAME, make_command)
+            self.output.warn(make_command)
+            self.run(make_command)
         
     def build_with_configure(self): 
-        env = ConfigureEnvironment(self.deps_cpp_info, self.settings)
-        env_line = env.command_line.replace('CFLAGS="', 'CFLAGS="-fPIC ')
-    
+        env = AutoToolsBuildEnvironment(self)
+        env.flags.append('-fPIC')
+
         if self.settings.os == "Macos":
             old_str = '-install_name \$rpath/\$soname'
             new_str = '-install_name \$soname'
             replace_in_file("./%s/configure" % self.ZIP_FOLDER_NAME, old_str, new_str)
-                 
-        self.run("cd %s && %s ./configure --with-python=no --without-lzma" % (self.ZIP_FOLDER_NAME, env.command_line))
-        #self.run("cd %s && %s make check" % (self.ZIP_FOLDER_NAME, env.command_line))
-        self.run("cd %s && %s make" % (self.ZIP_FOLDER_NAME, env.command_line))
-        
-        
+
+        with environment_append(env.vars):
+            self.run("cd %s && ./configure --with-python=no --without-lzma" % (self.ZIP_FOLDER_NAME))
+            self.run("cd %s && make" % (self.ZIP_FOLDER_NAME))
+
+
         #zlib = "--with-zlib=%s" % self.deps_cpp_info["zlib"].lib_paths[0]
         #configure_command = "cd %s && %s ./configure %s --with-python=no" % (self.ZIP_FOLDER_NAME, 
         #                                                                         self.generic_env_configure_vars(), 
@@ -85,7 +86,7 @@ class LibxmlConan(ConanFile):
         #self.output.warn(configure_command)
         #self.run(configure_command)
         #self.run("cd %s && make" % self.ZIP_FOLDER_NAME)
-       
+
 
     def package(self):
         # Copy findZLIB.cmake to package
