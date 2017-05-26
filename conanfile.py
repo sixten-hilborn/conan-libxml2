@@ -1,7 +1,6 @@
-from conans import ConanFile
-import os, shutil
-from conans.tools import download, unzip, replace_in_file, check_md5, environment_append, vcvars_command
-from conans import CMake, AutoToolsBuildEnvironment, VisualStudioBuildEnvironment
+from conans import ConanFile, CMake, AutoToolsBuildEnvironment, VisualStudioBuildEnvironment, ConfigureEnvironment
+from conans.tools import download, unzip, replace_in_file, environment_append, vcvars_command
+import os
 
 
 class LibxmlConan(ConanFile):
@@ -38,43 +37,39 @@ class LibxmlConan(ConanFile):
     def build_windows(self):
         iconv_headers_paths = self.deps_cpp_info["winiconv"].include_paths[0]
         iconv_lib_paths= " ".join(['lib="%s"' % lib for lib in self.deps_cpp_info["winiconv"].lib_paths])
-        is_vs = self.settings.compiler == "Visual Studio"
+        compiler = "msvc" if self.settings.compiler == "Visual Studio" else self.settings.compiler == "gcc"
 
-        env = VisualStudioBuildEnvironment(self) if is_vs else AutoToolsBuildEnvironment(self)
-        with environment_append(env.vars):
-            vc_command = vcvars_command(self.settings) if is_vs else ''
-            if vc_command:
-                vc_command += ' &&'
-            compiler = "msvc" if is_vs else self.settings.compiler == "gcc"
-            debug = "yes" if self.settings.build_type == "Debug" else "no"
+        env = ConfigureEnvironment(self.deps_cpp_info, self.settings)
+        vc_command = env.command_line_env
+        debug = "yes" if self.settings.build_type == "Debug" else "no"
 
-            configure_command = "%s cd %s/win32 && cscript configure.js " \
-                                "zlib=1 compiler=%s cruntime=/%s debug=%s include=\"%s\" %s" % (vc_command,
-                                                                                self.ZIP_FOLDER_NAME,
-                                                                                compiler, 
-                                                                                self.settings.compiler.runtime,
-                                                                                debug, 
-                                                                                iconv_headers_paths, 
-                                                                                iconv_lib_paths) 
-            self.output.warn(configure_command)
-            self.run(configure_command)
-
-            makefile_path = os.path.join(self.ZIP_FOLDER_NAME, "win32", "Makefile.msvc")
-            # Zlib library name is not zlib.lib always, it depends on configuration
-            replace_in_file(makefile_path, "LIBS = $(LIBS) zlib.lib", "LIBS = $(LIBS) %s.lib" % self.deps_cpp_info["zlib"].libs[0])
-
-            make_command = "nmake /f Makefile.msvc" if is_vs else "make -f Makefile.mingw"
-            make_command = "%s cd %s/win32 && %s" % (vc_command, self.ZIP_FOLDER_NAME, make_command)
-            self.output.warn(make_command)
-            self.run(make_command)
+        configure_command = "%s && cd %s/win32 && cscript configure.js " \
+                            "zlib=1 compiler=%s cruntime=/%s debug=%s include=\"%s\" %s" % (vc_command,
+                                                                               self.ZIP_FOLDER_NAME,
+                                                                               compiler, 
+                                                                               self.settings.compiler.runtime,
+                                                                               debug, 
+                                                                               iconv_headers_paths, 
+                                                                               iconv_lib_paths) 
+        self.output.warn(configure_command)
+        self.run(configure_command)
         
+        makefile_path = os.path.join(self.ZIP_FOLDER_NAME, "win32", "Makefile.msvc")
+        # Zlib library name is not zlib.lib always, it depends on configuration
+        replace_in_file(makefile_path, "LIBS = $(LIBS) zlib.lib", "LIBS = $(LIBS) %s.lib" % self.deps_cpp_info["zlib"].libs[0])
+        
+        make_command = "nmake /f Makefile.msvc" if self.settings.compiler == "Visual Studio" else "make -f Makefile.mingw"
+        make_command = "%s && cd %s/win32 && %s" % (vc_command, self.ZIP_FOLDER_NAME, make_command)
+        self.output.warn(make_command)
+        self.run(make_command)
+
     def build_with_configure(self): 
         env = AutoToolsBuildEnvironment(self)
         env.flags.append('-fPIC')
 
         if self.settings.os == "Macos":
-            old_str = '-install_name \$rpath/\$soname'
-            new_str = '-install_name \$soname'
+            old_str = '-install_name \\$rpath/\\$soname'
+            new_str = '-install_name \\$soname'
             replace_in_file("./%s/configure" % self.ZIP_FOLDER_NAME, old_str, new_str)
 
         with environment_append(env.vars):
